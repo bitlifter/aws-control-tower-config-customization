@@ -23,7 +23,7 @@ Parameters:
 
   ConfigRecorderExcludedResourceTypes:
     Description: List of all resource types to be excluded from Config Recorder if you pick EXCLUSION strategy
-    Default: "AWS::HealthLake::FHIRDatastore,AWS::Pinpoint::Segment,AWS::Pinpoint::ApplicationSettings"
+    Default: "AWS::HealthLake::FHIRDatastore,AWS::Pinpoint::Segment,AWS::Pinpoint::ApplicationSettings,AWS::EC2::EC2Fleet,AWS::EC2::SpotFleet"
     Type: String
 
   ConfigRecorderIncludedResourceTypes:
@@ -33,12 +33,12 @@ Parameters:
 
   ConfigRecorderDailyResourceTypes:
     Description: List of all resource types to be set to a daily cadence
-    Default: "AWS::AutoScaling::AutoScalingGroup,AWS::AutoScaling::LaunchConfiguration"
+    Default: ""
     Type: String
 
   ConfigRecorderDailyGlobalResourceTypes:
     Description: List of Global resource types to be set to a daily cadence in the AWS Control Tower home region. Append to this list as needed.
-    Default: "AWS::IAM::Policy,AWS::IAM::User,AWS::IAM::Role,AWS::IAM::Group"
+    Default: ""
     Type: String
 
   ConfigRecorderDefaultRecordingFrequency:

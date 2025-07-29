@@ -1,0 +1,360 @@
+h1. AWS Control Tower Config Customization Solution
+
+h2. Executive Summary
+
+The AWS Control Tower Config Customization solution provides an automated approach to exclude specific AWS resource types from AWS Config recording across all Control Tower managed accounts. This implementation specifically excludes EC2 Fleet and EC2 Spot Fleet resources, which are commonly used for dynamic compute workloads and can generate excessive Config recording costs without providing significant compliance value.
+
+h3. Key Benefits
+* *Cost Optimization*: Reduces AWS Config costs by excluding high-volume, transient resources
+* *Automated Management*: Applies exclusions automatically to all existing and new Control Tower accounts
+* *Compliance Maintained*: Preserves Control Tower baseline compliance while customizing Config recording
+* *Scalable Solution*: Works seamlessly as new accounts are added to the organization
+
+h2. Architecture Overview
+
+h3. Solution Components
+
+The solution implements a Producer-Consumer Lambda pattern that responds to Control Tower lifecycle events:
+
+{panel:title=Architecture Flow|borderStyle=solid|borderColor=#ccc|titleBGColor=#f7f7f7|bgColor=#ffffff}
+Control Tower Lifecycle Events → Producer Lambda (Event Handler) → SQS Queue (Message Buffer) → Consumer Lambda (Config Updater) → Target Account Config Recorder
+{panel}
+
+h3. Component Details
+
+# *Producer Lambda Function*
+#* Monitors Control Tower lifecycle events via EventBridge
+#* Triggers on: Account creation, Account updates, Landing Zone updates
+#* Filters excluded accounts (Management, Log Archive, Audit)
+#* Sends account information to SQS queue for processing
+
+# *Consumer Lambda Function*
+#* Processes messages from SQS queue
+#* Assumes AWSControlTowerExecution role in target accounts
+#* Updates Config recorder settings to exclude specified resource types
+#* Applies daily recording frequency for specific resource types
+
+# *SQS Queue*
+#* Provides reliable message delivery between Lambda functions
+#* Enables retry logic and error handling
+#* Decouples event processing from Config updates
+
+h2. Environment Configuration
+
+h3. AWS Control Tower Setup
+||Parameter||Value||
+|Management Account|891377069955|
+|Log Archive Account|058264522153|
+|Audit Account|211125586359|
+|Control Tower Home Region|us-east-2|
+|AWS CLI Profile|org-admin|
+|CloudFormation Stack Name|ControlTowerConfigCustomization|
+
+h3. Excluded Resource Types
+The solution excludes the following resource types from AWS Config recording:
+
+||Resource Type||Description||Status||
+|AWS::EC2::EC2Fleet|EC2 Fleet configurations|(/) Newly Added|
+|AWS::EC2::SpotFleet|EC2 Spot Fleet configurations|(/) Newly Added|
+|AWS::HealthLake::FHIRDatastore|HealthLake FHIR datastores|Existing|
+|AWS::Pinpoint::Segment|Pinpoint segments|Existing|
+|AWS::Pinpoint::ApplicationSettings|Pinpoint application settings|Existing|
+
+h2. Prerequisites
+
+{info:title=Required Setup}
+Before deploying the solution, ensure you have:
+
+# *AWS CLI Configuration*
+#* AWS CLI installed (version 2.x recommended)
+#* Configured with appropriate credentials
+#* Profile {{org-admin}} with Control Tower management account access
+
+# *Required Permissions*
+#* Access to Control Tower management account (891377069955)
+#* Permissions to create CloudFormation stacks
+#* IAM permissions for Lambda and SQS resource creation
+
+# *Python Environment*
+#* Python 3.x installed
+#* boto3 library available ({{pip install boto3}})
+#* Access to run Python scripts from command line
+
+# *Control Tower Status*
+#* Control Tower fully deployed and operational
+#* All managed accounts enrolled successfully
+#* Landing Zone version is current
+{info}
+
+h2. Deployment Instructions
+
+h3. Step 1: Clone or Download the Solution
+
+Ensure you have the solution files in your local environment:
+{code:bash}
+cd config-customization/aws-control-tower-config-customization
+{code}
+
+h3. Step 2: Review Configuration
+
+Verify the deployment configuration in {{deploy.py}}:
+* Stack Name: ControlTowerConfigCustomization
+* Excluded Accounts: Management, Log Archive, Audit accounts
+* Excluded Resource Types: EC2 Fleet and Spot Fleet resources
+
+h3. Step 3: Deploy the Solution
+
+Execute the deployment script with the configured AWS profile:
+
+{code:bash}
+AWS_PROFILE=org-admin python3 deploy.py
+{code}
+
+{expand:title=Expected Deployment Output}
+{code}
+AWS Control Tower Config Customization Deployment
+============================================================
+✓ AWS credentials verified
+  Account: 891377069955
+  User/Role: arn:aws:iam::891377069955:user/admin
+Configuration:
+  Stack Name: ControlTowerConfigCustomization
+  Region: us-east-2
+  Excluded Accounts: ['891377069955', '058264522153', '211125586359']
+  Excluded Resource Types: EC2Fleet, SpotFleet (and others)
+Creating new stack 'ControlTowerConfigCustomization'...
+✓ Stack create initiated successfully
+Waiting for stack operation to complete...
+✓ Stack deployment completed successfully!
+{code}
+{expand}
+
+h3. Step 4: Verify Deployment
+
+Run the verification script to confirm successful deployment:
+
+{code:bash}
+AWS_PROFILE=org-admin python3 verify.py
+{code}
+
+For complete verification including a managed account check:
+{code:bash}
+export TARGET_ACCOUNT="123456789012"  # Replace with your managed account ID
+AWS_PROFILE=org-admin python3 verify.py
+{code}
+
+h2. Verification Procedures
+
+h3. Automated Verification
+
+The {{verify.py}} script performs the following checks:
+
+# *CloudFormation Stack Status*
+#* Confirms stack is in COMPLETE state
+#* Verifies stack parameters include EC2 Fleet exclusions
+#* Shows last update timestamp
+
+# *Lambda Function Status*
+#* Checks Producer and Consumer Lambda deployment
+#* Reviews recent execution logs
+#* Confirms EventBridge rule configuration
+
+# *Config Recorder Settings* (if TARGET_ACCOUNT specified)
+#* Assumes role in target account
+#* Retrieves Config recorder configuration
+#* Confirms exclusion list contains EC2 Fleet resources
+
+h3. Manual Verification
+
+{tabs}
+{tab:title=AWS Console}
+# Navigate to AWS Config in any managed account
+# Click "Settings" in the left navigation menu
+# Select the "Recording" tab
+# Verify the exclusion list contains:
+#* AWS::EC2::EC2Fleet
+#* AWS::EC2::SpotFleet
+{tab}
+{tab:title=AWS CLI}
+{code:bash}
+# Assume role in managed account
+aws sts assume-role \
+  --role-arn arn:aws:iam::ACCOUNT_ID:role/AWSControlTowerExecution \
+  --role-session-name ConfigCheck
+
+# Check Config recorder settings
+aws configservice describe-configuration-recorders \
+  --region us-east-2 \
+  --query 'ConfigurationRecorders[0].recordingGroup.exclusionByResourceTypes.resourceTypes'
+{code}
+{tab}
+{tabs}
+
+h3. Monitoring Lambda Executions
+
+View real-time Lambda logs:
+{code:bash}
+# Get Lambda function names
+aws cloudformation describe-stack-resources \
+  --stack-name ControlTowerConfigCustomization \
+  --region us-east-2 \
+  --profile org-admin \
+  --query 'StackResources[?ResourceType==`AWS::Lambda::Function`].PhysicalResourceId'
+
+# Tail logs for Producer Lambda
+aws logs tail /aws/lambda/[ProducerFunctionName] --follow --region us-east-2 --profile org-admin
+
+# Tail logs for Consumer Lambda
+aws logs tail /aws/lambda/[ConsumerFunctionName] --follow --region us-east-2 --profile org-admin
+{code}
+
+h2. Troubleshooting Guide
+
+h3. Common Issues and Resolutions
+
+{warning:title=Important Notes}
+* Deploy from Management Account: This solution must be deployed from your AWS Control Tower management account (891377069955)
+* Region: Deploy in your Control Tower home region (us-east-2)
+* AWS Profile: Use the org-admin profile for authentication
+* Propagation Time: Changes may take 5-10 minutes to propagate to all managed accounts
+* Existing Resources: This only affects future Config recording. Existing Config data is not deleted
+{warning}
+
+{expand:title=Issue: Deployment Fails with "No updates are to be performed"}
+*Cause*: Stack is already up-to-date with no changes
+*Resolution*: This is expected behavior. The stack is already deployed correctly.
+{expand}
+
+{expand:title=Issue: Consumer Lambda Fails with Access Denied}
+*Cause*: AWSControlTowerExecution role missing in target account
+*Resolution*:
+* Verify account is enrolled in Control Tower
+* Check Control Tower dashboard for enrollment status
+* Re-enroll account if necessary
+{expand}
+
+{expand:title=Issue: Config Recorder Not Updated After Deployment}
+*Cause*: Processing delay or Lambda execution failure
+*Resolution*:
+* Wait 5-10 minutes for propagation
+* Check Lambda logs for errors
+* Manually trigger update by updating stack with new timestamp
+{expand}
+
+{expand:title=Issue: Stack Creation Fails with IAM Error}
+*Cause*: Insufficient permissions in deployment account
+*Resolution*:
+* Verify using Control Tower management account
+* Ensure AWS profile has AdministratorAccess
+* Check AWS Organizations SCPs for restrictions
+{expand}
+
+h3. Debug Commands
+
+{code:bash}
+# Check SQS queue for pending messages
+aws sqs get-queue-attributes \
+  --queue-url [QueueURL] \
+  --attribute-names ApproximateNumberOfMessages \
+  --region us-east-2 \
+  --profile org-admin
+
+# View recent Control Tower events
+aws events list-rules \
+  --name-prefix ControlTower \
+  --region us-east-2 \
+  --profile org-admin
+
+# Check Lambda function configuration
+aws lambda get-function-configuration \
+  --function-name [FunctionName] \
+  --region us-east-2 \
+  --profile org-admin
+{code}
+
+h2. Rollback Procedures
+
+h3. Option 1: Complete Stack Deletion (Recommended)
+
+Remove the solution and restore Control Tower defaults:
+
+{code:bash}
+aws cloudformation delete-stack \
+  --stack-name ControlTowerConfigCustomization \
+  --region us-east-2 \
+  --profile org-admin
+
+# Monitor deletion
+aws cloudformation wait stack-delete-complete \
+  --stack-name ControlTowerConfigCustomization \
+  --region us-east-2 \
+  --profile org-admin
+{code}
+
+h3. Option 2: Modify Exclusion List
+
+Update the stack to remove specific exclusions:
+
+# Edit {{template.yaml}}
+# Modify the {{ConfigRecorderExcludedResourceTypes}} parameter default value
+# Remove "AWS::EC2::EC2Fleet,AWS::EC2::SpotFleet" from the list
+# Redeploy: {{AWS_PROFILE=org-admin python3 deploy.py}}
+
+h3. Post-Rollback Verification
+
+After rollback, verify Config recorders have reverted:
+{code:bash}
+# Check a managed account
+aws configservice describe-configuration-recorders \
+  --region us-east-2 \
+  --query 'ConfigurationRecorders[0].recordingGroup'
+{code}
+
+h2. Best Practices and Recommendations
+
+{panel:title=Best Practices|borderStyle=solid|borderColor=#3572b0|titleBGColor=#3572b0|titleColor=#ffffff|bgColor=#f0f5ff}
+h4. 1. Testing Strategy
+* Always test in a non-production Control Tower environment first
+* Verify with a subset of accounts before organization-wide deployment
+* Monitor Config costs before and after implementation
+
+h4. 2. Maintenance Guidelines
+* Review excluded resource types quarterly
+* Monitor Lambda function errors via CloudWatch
+* Keep Python scripts updated with latest boto3 version
+
+h4. 3. Security Considerations
+* Solution uses existing Control Tower execution roles
+* No additional IAM permissions required in member accounts
+* All actions are logged in CloudTrail
+
+h4. 4. Cost Optimization Tips
+* Consider excluding additional high-volume resource types
+* Monitor Config usage in Cost Explorer
+* Set up billing alerts for Config service
+{panel}
+
+h2. Additional Resources
+
+h3. AWS Documentation
+* [AWS Config Supported Resource Types|https://docs.aws.amazon.com/config/latest/developerguide/resource-config-reference.html]
+* [AWS Control Tower User Guide|https://docs.aws.amazon.com/controltower/latest/userguide/]
+* [AWS Config Pricing|https://aws.amazon.com/config/pricing/]
+
+h3. Solution Files
+* *template.yaml* - CloudFormation template with Lambda functions and resources
+* *deploy.py* - Python deployment script with pre-configured values
+* *verify.py* - Comprehensive verification script
+* *ct_configrecorder_override_producer.py* - Producer Lambda source code
+* *ct_configrecorder_override_consumer.py* - Consumer Lambda source code
+
+h3. Support Contacts
+For issues or questions:
+# Check CloudFormation stack events for deployment errors
+# Review Lambda CloudWatch logs for execution issues
+# Verify IAM permissions and Control Tower status
+# Contact your AWS TAM or Solutions Architect for advanced support
+
+----
+_Last Updated: January 2025_
+_Version: 1.0 - EC2 Fleet Exclusion Implementation_
